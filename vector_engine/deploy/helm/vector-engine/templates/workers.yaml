@@ -1,0 +1,134 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vector-engine.fullname" . }}-workers
+  labels:
+    {{- include "vector-engine.labels" . | nindent 4 }}
+    app: worker
+spec:
+  ports:
+    - name: grpc-primary-1
+      port: 50101
+    - name: grpc-replica-1
+      port: 50102
+    - name: grpc-primary-2
+      port: 50201
+    - name: grpc-replica-2
+      port: 50202
+  clusterIP: None
+  selector:
+    {{- include "vector-engine.selectorLabels" . | nindent 4 }}
+    app: worker
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vector-engine.fullname" . }}-worker
+  labels:
+    {{- include "vector-engine.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "vector-engine.fullname" . }}-workers
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "vector-engine.selectorLabels" . | nindent 6 }}
+      app: worker
+  template:
+    metadata:
+      labels:
+        {{- include "vector-engine.selectorLabels" . | nindent 8 }}
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              HOSTNAME=$(hostname)
+              INDEX=${HOSTNAME##*-}
+              ETCD_ENDPOINTS="http://{{ include "vector-engine.fullname" . }}-etcd:2379"
+              export ETCD_ENDPOINTS
+              
+              if [ $((INDEX % 2)) -eq 0 ]; then
+                # Even index -> Primary
+                PORT=$((50101 + INDEX / 2 * 100))
+                REPLICA_PORT=$((PORT + 1))
+                REPLICA_INDEX=$((INDEX + 1))
+                REPLICAS="worker-${REPLICA_INDEX}.{{ include "vector-engine.fullname" . }}-workers:${REPLICA_PORT}"
+                echo "Starting worker as PRIMARY on port $PORT, replicating to $REPLICAS..."
+                python3 -m vector_engine.app.worker \
+                  --port "$PORT" \
+                  --role primary \
+                  --replicas "$REPLICAS" \
+                  --host "${HOSTNAME}.{{ include "vector-engine.fullname" . }}-workers"
+              else
+                # Odd index -> Replica
+                PRIMARY_INDEX=$((INDEX - 1))
+                PRIMARY_PORT=$((50101 + PRIMARY_INDEX / 2 * 100))
+                PORT=$((PRIMARY_PORT + 1))
+                PRIMARY_ADDR="worker-${PRIMARY_INDEX}.{{ include "vector-engine.fullname" . }}-workers:${PRIMARY_PORT}"
+                echo "Starting worker as REPLICA on port $PORT, syncing from primary $PRIMARY_ADDR..."
+                python3 -m vector_engine.app.worker \
+                  --port "$PORT" \
+                  --role replica \
+                  --primary-addr "$PRIMARY_ADDR" \
+                  --host "${HOSTNAME}.{{ include "vector-engine.fullname" . }}-workers"
+              fi
+          ports:
+            - containerPort: 50101
+            - containerPort: 50102
+            - containerPort: 50201
+            - containerPort: 50202
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  HOSTNAME=$(hostname)
+                  INDEX=${HOSTNAME##*-}
+                  if [ $((INDEX % 2)) -eq 0 ]; then
+                    PORT=$((50101 + INDEX / 2 * 100))
+                  else
+                    PRIMARY_INDEX=$((INDEX - 1))
+                    PORT=$((50101 + PRIMARY_INDEX / 2 * 100 + 1))
+                  fi
+                  python3 -c "import grpc; from vector_engine.app.proto import engine_pb2, engine_pb2_grpc; import asyncio; channel = grpc.aio.insecure_channel(f'localhost:{PORT}'); stub = engine_pb2_grpc.SearchWorkerStub(channel); asyncio.run(stub.HealthCheck(engine_pb2.HealthRequest(), timeout=1.0))"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  HOSTNAME=$(hostname)
+                  INDEX=${HOSTNAME##*-}
+                  if [ $((INDEX % 2)) -eq 0 ]; then
+                    PORT=$((50101 + INDEX / 2 * 100))
+                  else
+                    PRIMARY_INDEX=$((INDEX - 1))
+                    PORT=$((50101 + PRIMARY_INDEX / 2 * 100 + 1))
+                  fi
+                  python3 -c "import grpc; from vector_engine.app.proto import engine_pb2, engine_pb2_grpc; import asyncio; channel = grpc.aio.insecure_channel(f'localhost:{PORT}'); stub = engine_pb2_grpc.SearchWorkerStub(channel); asyncio.run(stub.HealthCheck(engine_pb2.HealthRequest(), timeout=1.0))"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: worker-data
+              mountPath: /workspace/vector_engine/data
+  volumeClaimTemplates:
+    - metadata:
+        name: worker-data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        {{- if .Values.worker.storage.storageClass }}
+        storageClassName: "{{ .Values.worker.storage.storageClass }}"
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.worker.storage.size }}

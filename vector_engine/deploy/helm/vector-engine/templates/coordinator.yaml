@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vector-engine.fullname" . }}-coordinator
+  labels:
+    {{- include "vector-engine.labels" . | nindent 4 }}
+    app: coordinator
+spec:
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+    - name: grpc
+      port: 50050
+      targetPort: 50050
+  selector:
+    {{- include "vector-engine.selectorLabels" . | nindent 4 }}
+    app: coordinator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vector-engine.fullname" . }}-coordinator
+  labels:
+    {{- include "vector-engine.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.coordinator.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "vector-engine.selectorLabels" . | nindent 6 }}
+      app: coordinator
+  template:
+    metadata:
+      labels:
+        {{- include "vector-engine.selectorLabels" . | nindent 8 }}
+        app: coordinator
+    spec:
+      containers:
+        - name: coordinator
+          image: "{{ .Values.coordinator.image.repository }}:{{ .Values.coordinator.image.tag }}"
+          imagePullPolicy: {{ .Values.coordinator.image.pullPolicy }}
+          env:
+            - name: MODE
+              value: "coordinator"
+            - name: ETCD_ENDPOINTS
+              value: "http://{{ include "vector-engine.fullname" . }}-etcd:2379"
+            - name: REDIS_URL
+              value: "redis://{{ include "vector-engine.fullname" . }}-redis:6379/0"
+            - name: COORDINATOR_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: STANDBY
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8000
+            - name: grpc
+              containerPort: 50050
+          resources:
+            {{- toYaml .Values.coordinator.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "vector-engine.fullname" . }}-ingress
+  labels:
+    {{- include "vector-engine.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.ingress.className | quote }}
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+spec:
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "vector-engine.fullname" . }}-coordinator
+                port:
+                  number: 8000
+{{- end }}

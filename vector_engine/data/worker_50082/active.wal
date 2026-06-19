@@ -1,0 +1,3 @@
+{"op": "insert", "id": "v1", "vector": [1.0, 0.0, 0.0], "metadata": {"name": "x"}, "timestamp": 1781808848.305783}
+{"op": "insert", "id": "v2", "vector": [0.0, 1.0, 0.0], "metadata": {"name": "y"}, "timestamp": 1781808848.306577}
+{"op": "insert", "id": "v3", "vector": [0.800000011920929, 0.6000000238418579, 0.0], "metadata": {"name": "diag"}, "timestamp": 1781808848.307297}

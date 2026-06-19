@@ -1,0 +1,2 @@
+{"op": "insert", "id": "doc3", "vector": [0.0, 0.0, 1.0, 0.0], "metadata": {"title": "Organic Chemistry Fundamentals", "category": "Chemistry"}, "timestamp": 1781861208.307034}
+{"op": "insert", "id": "doc5", "vector": [0.10000000149011612, 0.10000000149011612, 0.8999999761581421, 0.30000001192092896], "metadata": {"title": "Galactic Dynamics & Astrophysics", "category": "Astronomy"}, "timestamp": 1781861208.3094158}

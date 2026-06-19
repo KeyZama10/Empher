@@ -1,0 +1,6 @@
+apiVersion: v2
+name: vector-engine
+description: Helm chart for deploying the Distributed Vector Search Engine cluster.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

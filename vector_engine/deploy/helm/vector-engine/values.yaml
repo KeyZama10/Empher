@@ -1,0 +1,76 @@
+# Values for vector-engine
+
+coordinator:
+  replicaCount: 2
+  image:
+    repository: vector-search-engine
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+worker:
+  replicaCount: 4 # Determines number of storage instances (e.g. 2 primary-replica shards)
+  image:
+    repository: vector-search-engine
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  storage:
+    size: 2Gi
+    storageClass: ""
+
+etcd:
+  replicaCount: 1
+  image:
+    repository: quay.io/coreos/etcd
+    tag: v3.5.9
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  storage:
+    size: 1Gi
+    storageClass: ""
+
+redis:
+  image:
+    repository: redis
+    tag: 7-alpine
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: vector-engine.local
+
+monitoring:
+  enabled: true
+  prometheus:
+    image:
+      repository: prom/prometheus
+      tag: latest
+  grafana:
+    image:
+      repository: grafana/grafana
+      tag: latest

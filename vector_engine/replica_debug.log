@@ -1,0 +1,4 @@
+2026-06-19 13:20:58,060 [INFO] Worker: etcd cluster not reachable. Falling back to Shared File-Backed Mock Registry.
+2026-06-19 13:20:58,062 [INFO] Worker: Starting async gRPC worker server on port 50092 [Role: replica]...
+2026-06-19 13:21:04,619 [INFO] Worker: Received InsertVector request [Role: replica]: ID=rv1
+2026-06-19 13:21:05,623 [INFO] Worker: Received SearchVectors request: top_k=2

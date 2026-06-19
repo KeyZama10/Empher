@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: coordinator-service
+  labels:
+    app: coordinator
+spec:
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+    - name: grpc
+      port: 50050
+      targetPort: 50050
+  selector:
+    app: coordinator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coordinator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: coordinator
+  template:
+    metadata:
+      labels:
+        app: coordinator
+    spec:
+      containers:
+        - name: coordinator
+          image: vector-search-engine:latest
+          imagePullPolicy: IfNotPresent
+          environment:
+            - name: MODE
+              value: "coordinator"
+            - name: ETCD_ENDPOINTS
+              value: "http://etcd-service:2379"
+            - name: REDIS_URL
+              value: "redis://redis-service:6379/0"
+            - name: COORDINATOR_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: STANDBY
+              value: "true" # Dynamically negotiates active leader via etcd lock
+          ports:
+            - name: http
+              containerPort: 8000
+            - name: grpc
+              containerPort: 50050
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 250m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10

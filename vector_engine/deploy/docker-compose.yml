@@ -1,0 +1,296 @@
+version: '3.8'
+
+networks:
+  vector-network:
+    driver: bridge
+
+services:
+  # --- Consensus and Metadata store (etcd) ---
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.9
+    container_name: etcd
+    command: >
+      etcd --name etcd
+      --initial-advertise-peer-urls http://etcd:2380
+      --listen-peer-urls http://0.0.0.0:2380
+      --listen-client-urls http://0.0.0.0:2379
+      --advertise-client-urls http://etcd:2379
+      --initial-cluster etcd=http://etcd:2380
+      --initial-cluster-state new
+    ports:
+      - "2379:2379"
+    networks:
+      - vector-network
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    restart: always
+
+  # --- Cache Layer (Redis) ---
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - vector-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    restart: always
+
+  # --- Active Coordinator (REST & gRPC Gateway) ---
+  coordinator-active:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: coordinator-active
+    ports:
+      - "8000:8000"
+      - "50050:50050"
+    environment:
+      - MODE=coordinator
+      - COORDINATOR_ID=coord_active
+      - STANDBY=false
+      - ETCD_ENDPOINTS=http://etcd:2379
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=INFO
+    depends_on:
+      etcd:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vector-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  # --- Standby Coordinator (Failover Standby Gateway) ---
+  coordinator-standby:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: coordinator-standby
+    ports:
+      - "8001:8000"
+      - "50051:50050"
+    environment:
+      - MODE=coordinator
+      - COORDINATOR_ID=coord_standby
+      - STANDBY=true
+      - ETCD_ENDPOINTS=http://etcd:2379
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=INFO
+    depends_on:
+      etcd:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vector-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  # --- Worker Shard 1: Primary ---
+  worker-shard1-primary:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: worker-shard1-primary
+    command: >
+      python3 -m vector_engine.app.worker
+      --port 50101
+      --role primary
+      --replicas worker-shard1-replica:50102
+      --host worker-shard1-primary
+    environment:
+      - ETCD_ENDPOINTS=http://etcd:2379
+      - WORKER_HOST=worker-shard1-primary
+    volumes:
+      - ./data/worker_50101:/workspace/vector_engine/data/worker_50101
+    depends_on:
+      etcd:
+        condition: service_healthy
+    ports:
+      - "50101:50101"
+    networks:
+      - vector-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import grpc; from vector_engine.app.proto import engine_pb2, engine_pb2_grpc; import asyncio; channel = grpc.aio.insecure_channel('localhost:50101'); stub = engine_pb2_grpc.SearchWorkerStub(channel); asyncio.run(stub.HealthCheck(engine_pb2.HealthRequest(), timeout=1.0))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  # --- Worker Shard 1: Read Replica ---
+  worker-shard1-replica:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: worker-shard1-replica
+    command: >
+      python3 -m vector_engine.app.worker
+      --port 50102
+      --role replica
+      --primary-addr worker-shard1-primary:50101
+      --host worker-shard1-replica
+    environment:
+      - ETCD_ENDPOINTS=http://etcd:2379
+      - WORKER_HOST=worker-shard1-replica
+    volumes:
+      - ./data/worker_50102:/workspace/vector_engine/data/worker_50102
+    depends_on:
+      etcd:
+        condition: service_healthy
+      worker-shard1-primary:
+        condition: service_started
+    ports:
+      - "50102:50102"
+    networks:
+      - vector-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import grpc; from vector_engine.app.proto import engine_pb2, engine_pb2_grpc; import asyncio; channel = grpc.aio.insecure_channel('localhost:50102'); stub = engine_pb2_grpc.SearchWorkerStub(channel); asyncio.run(stub.HealthCheck(engine_pb2.HealthRequest(), timeout=1.0))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  # --- Worker Shard 2: Primary ---
+  worker-shard2-primary:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: worker-shard2-primary
+    command: >
+      python3 -m vector_engine.app.worker
+      --port 50201
+      --role primary
+      --replicas worker-shard2-replica:50202
+      --host worker-shard2-primary
+    environment:
+      - ETCD_ENDPOINTS=http://etcd:2379
+      - WORKER_HOST=worker-shard2-primary
+    volumes:
+      - ./data/worker_50201:/workspace/vector_engine/data/worker_50201
+    depends_on:
+      etcd:
+        condition: service_healthy
+    ports:
+      - "50201:50201"
+    networks:
+      - vector-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import grpc; from vector_engine.app.proto import engine_pb2, engine_pb2_grpc; import asyncio; channel = grpc.aio.insecure_channel('localhost:50201'); stub = engine_pb2_grpc.SearchWorkerStub(channel); asyncio.run(stub.HealthCheck(engine_pb2.HealthRequest(), timeout=1.0))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  # --- Worker Shard 2: Read Replica ---
+  worker-shard2-replica:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: worker-shard2-replica
+    command: >
+      python3 -m vector_engine.app.worker
+      --port 50202
+      --role replica
+      --primary-addr worker-shard2-primary:50201
+      --host worker-shard2-replica
+    environment:
+      - ETCD_ENDPOINTS=http://etcd:2379
+      - WORKER_HOST=worker-shard2-replica
+    volumes:
+      - ./data/worker_50202:/workspace/vector_engine/data/worker_50202
+    depends_on:
+      etcd:
+        condition: service_healthy
+      worker-shard2-primary:
+        condition: service_started
+    ports:
+      - "50202:50202"
+    networks:
+      - vector-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import grpc; from vector_engine.app.proto import engine_pb2, engine_pb2_grpc; import asyncio; channel = grpc.aio.insecure_channel('localhost:50202'); stub = engine_pb2_grpc.SearchWorkerStub(channel); asyncio.run(stub.HealthCheck(engine_pb2.HealthRequest(), timeout=1.0))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  # --- Telemetry Aggregation (Prometheus) ---
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - coordinator-active
+    networks:
+      - vector-network
+    restart: always
+
+  # --- Observability Visualization (Grafana) ---
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+    volumes:
+      - ./grafana/provisioning/datasources/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+      - ./grafana/provisioning/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - vector-network
+    restart: always

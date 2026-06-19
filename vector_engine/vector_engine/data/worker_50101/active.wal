@@ -1,0 +1,3 @@
+{"op": "insert", "id": "doc1", "vector": [1.0, 0.0, 0.0, 0.0], "metadata": {"title": "Introduction to Linear Algebra", "category": "Math"}, "timestamp": 1781861208.300709}
+{"op": "insert", "id": "doc2", "vector": [0.0, 1.0, 0.0, 0.0], "metadata": {"title": "Quantum Mechanics & Wave Theory", "category": "Physics"}, "timestamp": 1781861208.303009}
+{"op": "insert", "id": "doc4", "vector": [0.800000011920929, 0.6000000238418579, 0.0, 0.0], "metadata": {"title": "Matrix Computations and Operations", "category": "Math"}, "timestamp": 1781861208.3070002}
