@@ -11,6 +11,9 @@ jobs:
   lint:
     name: Code Linting
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./vector_engine
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -33,6 +36,9 @@ jobs:
   test:
     name: Run Pytest & Coverage
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./vector_engine
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -51,7 +57,7 @@ jobs:
 
       - name: Run Test Suite
         env:
-          PYTHONPATH: ${{ github.workspace }}/..
+          PYTHONPATH: ${{ github.workspace }}/vector_engine/..
         run: |
           pytest --cov=vector_engine --cov-report=xml --cov-report=term-missing tests/
 
@@ -59,7 +65,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: coverage-report
-          path: coverage.xml
+          path: ./vector_engine/coverage.xml
 
   # --- 3. DOCKER COMPILATION JOB ---
   docker:
@@ -75,8 +81,8 @@ jobs:
       - name: Build Docker Image
         uses: docker/build-push-action@v4
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./vector_engine
+          file: ./vector_engine/Dockerfile
           push: false
           tags: vector-search-engine:latest
           cache-from: type=gha
@@ -84,4 +90,4 @@ jobs:
 
       - name: Validate Docker Compose Configuration
         run: |
-          docker compose -f deploy/docker-compose.yml config
+          docker compose -f ./vector_engine/deploy/docker-compose.yml config
